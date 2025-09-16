@@ -1,12 +1,15 @@
 #ifndef RVIZ_HPP_
 #define RVIZ_HPP_
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <raylib.h>
+#include <cassert>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
+#include <cmath>
 #include <mutex>
+#include <algorithm>
+#include <raylib.h>
 
 #define RVIZ_DEF_SINGLETON(classname)                         \
 public:                                                       \
@@ -47,6 +50,17 @@ struct PointRGB
     float b;
 }; // struct PointRGB
 
+struct Pose
+{
+    float x;
+    float y;
+    float z;
+    // rotation by z-y-x
+    float yaw;
+    float roll;
+    float pitch;
+}; // struct Pose
+
 using PointICloud = std::vector<PointI>;
 using PointRGBCloud = std::vector<PointRGB>;
 
@@ -54,21 +68,45 @@ using PointRGBCloud = std::vector<PointRGB>;
 class Viz
 {
     RVIZ_DEF_SINGLETON(Viz)
+
+    enum DrawableType
+    {
+        DT_UNKNOWN = 0,
+        DT_MESH_MODEL,
+        DT_POSE,
+    }; // enum DrawableType
+
+    struct DrawablePose
+    {
+        Vector3 start;
+        Vector3 x_end;
+        Vector3 y_end;
+        Vector3 z_end;
+    }; // struct DrawablePose
+
+    struct Drawable
+    {
+        Model model;
+        Mesh mesh;
+        DrawablePose pose;
+        DrawableType type;        
+        std::mutex lock;
+    }; // struct Drawable
 public:
     ~Viz();
-    void draw_pointcloud(const PointICloud& pc);
-    void draw_pointcloud(const PointRGBCloud& pc);
-    void draw_se3();
+    void draw_pointcloud(const std::string& key, const PointICloud& pc);
+    void draw_pointcloud(const std::string& key, const PointRGBCloud& pc);
+    void draw_pose(const std::string& key, const Pose& pose);
     void draw_image();
     void render();
     bool closed();
 private:
     Viz();
+    Drawable* get_drawable(const std::string& key);
 
     Camera camera_;
-    Model model_;
-    Mesh mesh_;
     Vector3 model_center_;
+    std::unordered_map<std::string, Drawable*> drawables_;
 }; // struct Viz
 
 } // namespace rviz
@@ -146,10 +184,6 @@ Viz::Viz()
     InitWindow(RVIZ_WIN_WIDTH, RVIZ_WIN_HEIGHT, RVIZ_WIN_NAME);    
     SetTargetFPS(RVIZ_TARGET_FPS);
 
-    mesh_.vertexCount = 0;
-    mesh_.vertices = nullptr;
-    mesh_.colors = nullptr;
-
     camera_.position   = {0.0f, 0.0f, 10.0f};
     camera_.target     = {0.0f, 0.0f, 0.0f};
     camera_.up         = {0.0f, 1.0f, 0.0f};
@@ -163,10 +197,23 @@ Viz::Viz()
 
 Viz::~Viz()
 {
-    delete [] mesh_.colors;
-    delete [] mesh_.vertices;
-    UnloadModel(model_);
+    for (auto& it: drawables_) {
+        if (it.second->type == DT_MESH_MODEL) {
+            delete [] it.second->mesh.colors;
+            delete [] it.second->mesh.vertices;
+            UnloadModel(it.second->model);
+        }
+        delete it.second;
+    }
     CloseWindow();
+}
+
+Viz::Drawable* Viz::get_drawable(const std::string& key)
+{
+    if (drawables_.find(key) == drawables_.end()) {
+        drawables_.insert(std::make_pair(key, new Drawable));
+    }
+    return drawables_.at(key);
 }
 
 bool Viz::closed()
@@ -222,54 +269,93 @@ void Viz::render()
     BeginDrawing();
         ClearBackground(BLACK);
         BeginMode3D(camera_);
-            DrawModelPoints(model_, model_center_, 1.0f, WHITE);
+            for (auto it : drawables_) {
+                switch (it.second->type) {
+                case DT_MESH_MODEL:
+                    DrawModelPoints(it.second->model, model_center_, 1.0f, WHITE);
+                    break;
+                case DT_POSE:
+                    DrawLine3D(it.second->pose.start, it.second->pose.x_end, RED);
+                    DrawLine3D(it.second->pose.start, it.second->pose.y_end, GREEN);
+                    DrawLine3D(it.second->pose.start, it.second->pose.z_end, BLUE);
+                    break;
+                default:
+                    assert(false && "Unknown drawable type");
+                }
+            }
         EndMode3D();
     EndDrawing();
 }
 
 #define RVIZ_MAX_COLOR_VEL 255
 
-void Viz::draw_pointcloud(const PointRGBCloud& pc)
+void Viz::draw_pointcloud(const std::string& key, const PointRGBCloud& pc)
 {
-    set_pointcloud_mesh_buffer(pc.size(), mesh_);
+    auto drawable{get_drawable(key)};
+    set_pointcloud_mesh_buffer(pc.size(), drawable->mesh);
     for (size_t i = 0; i < pc.size(); ++i) {
         const auto& point{pc.at(i)};
-        mesh_.vertices[i * 3 + 0] = point.y;
-        mesh_.vertices[i * 3 + 1] = point.x;
-        mesh_.vertices[i * 3 + 2] = point.z;
-        mesh_.colors[i * 4 + 0] = static_cast<uint8_t>(std::clamp(point.r, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
-        mesh_.colors[i * 4 + 1] = static_cast<uint8_t>(std::clamp(point.g, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
-        mesh_.colors[i * 4 + 2] = static_cast<uint8_t>(std::clamp(point.b, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
-        mesh_.colors[i * 4 + 3] = RVIZ_MAX_COLOR_VEL;
+        drawable->mesh.vertices[i * 3 + 0] = point.y;
+        drawable->mesh.vertices[i * 3 + 1] = point.x;
+        drawable->mesh.vertices[i * 3 + 2] = point.z;
+        drawable->mesh.colors[i * 4 + 0] = static_cast<uint8_t>(std::clamp(point.r, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
+        drawable->mesh.colors[i * 4 + 1] = static_cast<uint8_t>(std::clamp(point.g, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
+        drawable->mesh.colors[i * 4 + 2] = static_cast<uint8_t>(std::clamp(point.b, 0.0f, 1.0f) * RVIZ_MAX_COLOR_VEL);
+        drawable->mesh.colors[i * 4 + 3] = RVIZ_MAX_COLOR_VEL;
     }
 
-    UploadMesh(&mesh_, true);
-    model_ = LoadModelFromMesh(mesh_);
+    UploadMesh(&drawable->mesh, true);
+    drawable->model = LoadModelFromMesh(drawable->mesh);
+    drawable->type = DT_MESH_MODEL;
 }
 
-void Viz::draw_pointcloud(const PointICloud& pc)
+void Viz::draw_pointcloud(const std::string& key, const PointICloud& pc)
 {
-    set_pointcloud_mesh_buffer(pc.size(), mesh_);
+    auto drawable{get_drawable(key)};
+    set_pointcloud_mesh_buffer(pc.size(), drawable->mesh);
     Color color;
     for (size_t i = 0; i < pc.size(); ++i) {
         const auto& point{pc.at(i)};
         heatmap(point.i, color);
-        mesh_.vertices[i * 3 + 0] = point.y;
-        mesh_.vertices[i * 3 + 1] = point.x;
-        mesh_.vertices[i * 3 + 2] = point.z;
-        mesh_.colors[i * 4 + 0] = color.r;
-        mesh_.colors[i * 4 + 1] = color.g;
-        mesh_.colors[i * 4 + 2] = color.b;
-        mesh_.colors[i * 4 + 3] = color.a;
+        drawable->mesh.vertices[i * 3 + 0] = point.y;
+        drawable->mesh.vertices[i * 3 + 1] = point.x;
+        drawable->mesh.vertices[i * 3 + 2] = point.z;
+        drawable->mesh.colors[i * 4 + 0] = color.r;
+        drawable->mesh.colors[i * 4 + 1] = color.g;
+        drawable->mesh.colors[i * 4 + 2] = color.b;
+        drawable->mesh.colors[i * 4 + 3] = color.a;
     }
 
-    UploadMesh(&mesh_, true);
-    model_ = LoadModelFromMesh(mesh_);
+    UploadMesh(&drawable->mesh, true);
+    drawable->model = LoadModelFromMesh(drawable->mesh);
+    drawable->type = DT_MESH_MODEL;
 }
 
-void Viz::draw_se3()
+void Viz::draw_pose(const std::string& key, const Pose& pose)
 {
+    auto drawable{get_drawable(key)};
+    std::lock_guard<std::mutex> guard{drawable->lock};
+    drawable->pose.start.x = pose.x;
+    drawable->pose.start.y = pose.y;
+    drawable->pose.start.z = pose.z;
 
+    const auto cos_yaw{std::cos(pose.yaw)};
+    const auto cos_roll{std::cos(pose.roll)};
+    const auto cos_pitch{std::cos(pose.pitch)};
+    const auto sin_yaw{std::sin(pose.yaw)};
+    const auto sin_roll{std::sin(pose.roll)};
+    const auto sin_pitch{std::sin(pose.pitch)};
+
+    drawable->pose.x_end.x = cos_pitch * cos_yaw;
+    drawable->pose.x_end.y = cos_pitch * sin_yaw;
+    drawable->pose.x_end.z = -sin_pitch;
+    drawable->pose.y_end.x = sin_roll * sin_pitch * cos_yaw - cos_roll * sin_yaw;
+    drawable->pose.y_end.y = sin_roll * sin_pitch * sin_yaw - cos_roll * cos_yaw;
+    drawable->pose.y_end.z = sin_roll * cos_pitch;
+    drawable->pose.z_end.x = cos_roll * sin_pitch * cos_yaw - sin_roll * sin_yaw;
+    drawable->pose.z_end.y = cos_roll * sin_pitch * sin_yaw - sin_roll * cos_yaw;
+    drawable->pose.z_end.z = cos_roll * cos_pitch;
+    drawable->type = DT_POSE;
 }
 
 void Viz::draw_image()
