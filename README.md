@@ -1,1 +1,3 @@
-# rviz.hpp
+# Raylib based VisualiZer (RVIZ)
+
+STB style header only raylib wrapper for render pointcloud, image, so3, se3 ...
