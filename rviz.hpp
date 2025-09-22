@@ -2,6 +2,7 @@
 #define RVIZ_HPP_
 
 #include <cassert>
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -335,8 +336,8 @@ void Viz::draw_pose(const std::string& topic, const Pose& pose)
 {
     auto drawable{get_drawable(topic)};
     std::lock_guard<std::mutex> guard{drawable->lock};
-    drawable->pose.start.x = pose.x;
-    drawable->pose.start.y = pose.y;
+    drawable->pose.start.x = pose.y;
+    drawable->pose.start.y = pose.x;
     drawable->pose.start.z = pose.z;
 
     const auto cos_yaw{std::cos(pose.yaw)};
@@ -346,17 +347,18 @@ void Viz::draw_pose(const std::string& topic, const Pose& pose)
     const auto sin_roll{std::sin(pose.roll)};
     const auto sin_pitch{std::sin(pose.pitch)};
 
-    drawable->pose.x_end.x = cos_pitch * sin_yaw;
-    drawable->pose.x_end.y = cos_pitch * cos_yaw;
-    drawable->pose.x_end.z = -sin_pitch;
+    drawable->pose.x_end.x = -(pose.y + cos_pitch * sin_yaw);
+    drawable->pose.x_end.y = pose.x + cos_pitch * cos_yaw;
+    drawable->pose.x_end.z = pose.z + -sin_pitch;
+    // std::cout << drawable->pose.x_end.x << ", " << drawable->pose.x_end.y << ", "  << drawable->pose.x_end.z << "\n";
 
-    drawable->pose.y_end.x = sin_roll * sin_pitch * sin_yaw - cos_roll * cos_yaw;
-    drawable->pose.y_end.y = sin_roll * sin_pitch * cos_yaw - cos_roll * sin_yaw;
-    drawable->pose.y_end.z = sin_roll * cos_pitch;
+    drawable->pose.y_end.x = (pose.y + sin_roll * sin_pitch * sin_yaw - cos_roll * cos_yaw);
+    drawable->pose.y_end.y = pose.x + sin_roll * sin_pitch * cos_yaw - cos_roll * sin_yaw;
+    drawable->pose.y_end.z = pose.z + sin_roll * cos_pitch;
 
-    drawable->pose.z_end.x = cos_roll * sin_pitch * sin_yaw - sin_roll * cos_yaw;
-    drawable->pose.z_end.y = cos_roll * sin_pitch * cos_yaw - sin_roll * sin_yaw;
-    drawable->pose.z_end.z = cos_roll * cos_pitch;
+    drawable->pose.z_end.x = -(pose.y + cos_roll * sin_pitch * sin_yaw - sin_roll * cos_yaw);
+    drawable->pose.z_end.y = pose.x + cos_roll * sin_pitch * cos_yaw - sin_roll * sin_yaw;
+    drawable->pose.z_end.z = pose.z + cos_roll * cos_pitch;
     drawable->type = DT_POSE;
 }
 
