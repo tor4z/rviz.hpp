@@ -94,15 +94,15 @@ class Viz
     }; // struct Drawable
 public:
     ~Viz();
-    void draw_pointcloud(const std::string& key, const PointICloud& pc);
-    void draw_pointcloud(const std::string& key, const PointRGBCloud& pc);
-    void draw_pose(const std::string& key, const Pose& pose);
+    void draw_pointcloud(const std::string& topic, const PointICloud& pc);
+    void draw_pointcloud(const std::string& topic, const PointRGBCloud& pc);
+    void draw_pose(const std::string& topic, const Pose& pose);
     void draw_image();
     void render();
     bool closed();
 private:
     Viz();
-    Drawable* get_drawable(const std::string& key);
+    Drawable* get_drawable(const std::string& topic);
 
     Camera camera_;
     Vector3 model_center_;
@@ -208,12 +208,12 @@ Viz::~Viz()
     CloseWindow();
 }
 
-Viz::Drawable* Viz::get_drawable(const std::string& key)
+Viz::Drawable* Viz::get_drawable(const std::string& topic)
 {
-    if (drawables_.find(key) == drawables_.end()) {
-        drawables_.insert(std::make_pair(key, new Drawable));
+    if (drawables_.find(topic) == drawables_.end()) {
+        drawables_.insert(std::make_pair(topic, new Drawable));
     }
-    return drawables_.at(key);
+    return drawables_.at(topic);
 }
 
 bool Viz::closed()
@@ -289,9 +289,9 @@ void Viz::render()
 
 #define RVIZ_MAX_COLOR_VEL 255
 
-void Viz::draw_pointcloud(const std::string& key, const PointRGBCloud& pc)
+void Viz::draw_pointcloud(const std::string& topic, const PointRGBCloud& pc)
 {
-    auto drawable{get_drawable(key)};
+    auto drawable{get_drawable(topic)};
     set_pointcloud_mesh_buffer(pc.size(), drawable->mesh);
     for (size_t i = 0; i < pc.size(); ++i) {
         const auto& point{pc.at(i)};
@@ -309,9 +309,9 @@ void Viz::draw_pointcloud(const std::string& key, const PointRGBCloud& pc)
     drawable->type = DT_MESH_MODEL;
 }
 
-void Viz::draw_pointcloud(const std::string& key, const PointICloud& pc)
+void Viz::draw_pointcloud(const std::string& topic, const PointICloud& pc)
 {
-    auto drawable{get_drawable(key)};
+    auto drawable{get_drawable(topic)};
     set_pointcloud_mesh_buffer(pc.size(), drawable->mesh);
     Color color;
     for (size_t i = 0; i < pc.size(); ++i) {
@@ -331,9 +331,9 @@ void Viz::draw_pointcloud(const std::string& key, const PointICloud& pc)
     drawable->type = DT_MESH_MODEL;
 }
 
-void Viz::draw_pose(const std::string& key, const Pose& pose)
+void Viz::draw_pose(const std::string& topic, const Pose& pose)
 {
-    auto drawable{get_drawable(key)};
+    auto drawable{get_drawable(topic)};
     std::lock_guard<std::mutex> guard{drawable->lock};
     drawable->pose.start.x = pose.x;
     drawable->pose.start.y = pose.y;
